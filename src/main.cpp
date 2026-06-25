@@ -99,11 +99,25 @@ void saveLabels() {
 #define HOLD_BAR_H       8
 #define HOLD_BAR_Y       (BTN_Y - 1 - HOLD_BAR_H)  // just above the divider line
 
-static bool fingerDown        = false;
-static uint32_t lastRawTouchMs = 0;   // last millis() when touch_touched() was true
-static bool holdActive        = false;
-static uint32_t holdStartMs   = 0;
-static int holdBarW           = 0;
+static bool fingerDown         = false;
+static uint32_t lastRawTouchMs = 0;
+static bool holdActive         = false;
+static uint32_t holdStartMs    = 0;
+static int holdBarW            = 0;
+
+// ---- Button hold-to-flash (hold 2 s → flash while held; hold 4 s → latched flash) ----
+#define BTN_HOLD_MS        2000
+#define BTN_HOLD_LATCH_MS  4000
+#define FLASH_PERIOD       375
+
+static int      holdBtnIdx     = -1;
+static uint32_t holdBtnStartMs = 0;
+static bool     flashActive    = false;
+static bool     flashOn        = false;
+static uint32_t flashLastMs    = 0;
+static bool     flashLatched[OUTPUT_COUNT]    = {};
+static bool     latchFlashOn[OUTPUT_COUNT]    = {};
+static uint32_t latchFlashLastMs[OUTPUT_COUNT] = {};
 
 // ---- PIN ----
 static const char CORRECT_PIN[] = "111111";
@@ -198,8 +212,14 @@ void drawOutputButton(int idx) {
     lcd.drawString(channelNames[idx], x+BTN_W/2, y+BTN_H/2);
 
     lcd.setFont(&FONT_SMALL);
-    lcd.setTextColor(on ? COLOR_NEON_GREEN : COLOR_DIM_GRAY);
-    lcd.drawString(on ? "ON" : "OFF", x+BTN_W/2, y+BTN_H-18);
+    bool flashing = (flashActive && holdBtnIdx == idx) || flashLatched[idx];
+    if (flashing) {
+        lcd.setTextColor(on ? COLOR_NEON_GREEN : COLOR_DIM_GRAY);
+        lcd.drawString("FLASH", x+BTN_W/2, y+BTN_H-18);
+    } else {
+        lcd.setTextColor(on ? COLOR_NEON_GREEN : COLOR_DIM_GRAY);
+        lcd.drawString(on ? "ON" : "OFF", x+BTN_W/2, y+BTN_H-18);
+    }
 }
 
 void drawMasterButtons() {
@@ -652,42 +672,112 @@ void loop() {
 
     switch (appState) {
     case ST_MAIN:
+        // ---- Header hold → engineering access ----
         if (fingerDown) {
             if (ty < BTN_Y) updateHoldProgress(ty);
             else cancelHold();
         }
         if (released) cancelHold();
+
+        // ---- New touch: record which button was pressed ----
         if (newTouch && ty >= BTN_Y) {
-            uint32_t now = millis();
-            if (now - lastTouchMs > TOUCH_DEBOUNCE_MS) {
-                lastTouchMs = now;
-                // individual buttons
-                for (int i = 0; i < OUTPUT_COUNT; i++) {
-                    int x = btnX(i%BTN_COLS), y = btnY(i/BTN_COLS);
-                    if (tx>=x && tx<x+BTN_W && ty>=y && ty<y+BTN_H) {
-                        relayState[i] = !relayState[i];
-                        sendRelayCommand(i+1, relayState[i]);
+            holdBtnIdx = -1;
+            // channel buttons
+            for (int i = 0; i < OUTPUT_COUNT; i++) {
+                int x = btnX(i%BTN_COLS), y = btnY(i/BTN_COLS);
+                if (tx>=x && tx<x+BTN_W && ty>=y && ty<y+BTN_H) {
+                    // Tapping a latched button cancels its latch
+                    if (flashLatched[i]) {
+                        flashLatched[i]  = false;
+                        latchFlashOn[i]  = false;
+                        relayState[i]    = false;
+                        sendRelayCommand(i+1, false);
                         drawOutputButton(i);
-                        goto done;
+                        break;
                     }
+                    holdBtnIdx     = i;
+                    holdBtnStartMs = now;
+                    flashActive    = false;
+                    break;
                 }
-                // master buttons
-                {
-                    int halfW = (800 - BTN_X*2 - BTN_GAP) / 2;
-                    if (ty >= MASTER_Y && ty < MASTER_Y+MASTER_H) {
-                        if (tx >= BTN_X && tx < BTN_X+halfW) {
-                            for (int i=0;i<OUTPUT_COUNT;i++) relayState[i]=true;
-                            sendRelayCommand(0, true);
-                            for (int i=0;i<OUTPUT_COUNT;i++) drawOutputButton(i);
-                        } else {
-                            for (int i=0;i<OUTPUT_COUNT;i++) relayState[i]=false;
-                            sendRelayCommand(0, false);
-                            for (int i=0;i<OUTPUT_COUNT;i++) drawOutputButton(i);
-                        }
-                    }
-                }
-                done:;
             }
+            // master buttons — fire immediately on press
+            int halfW = (800 - BTN_X*2 - BTN_GAP) / 2;
+            if (ty >= MASTER_Y && ty < MASTER_Y+MASTER_H) {
+                if (tx >= BTN_X && tx < BTN_X+halfW) {
+                    for (int i=0;i<OUTPUT_COUNT;i++) relayState[i]=true;
+                    sendRelayCommand(0, true);
+                    for (int i=0;i<OUTPUT_COUNT;i++) drawOutputButton(i);
+                } else {
+                    // Master Off — cancel all latched flashes
+                    for (int j=0;j<OUTPUT_COUNT;j++) {
+                        flashLatched[j] = false;
+                        latchFlashOn[j] = false;
+                    }
+                    for (int i=0;i<OUTPUT_COUNT;i++) relayState[i]=false;
+                    sendRelayCommand(0, false);
+                    for (int i=0;i<OUTPUT_COUNT;i++) drawOutputButton(i);
+                }
+            }
+        }
+
+        // ---- While holding a channel button ----
+        if (fingerDown && holdBtnIdx >= 0) {
+            uint32_t held = now - holdBtnStartMs;
+            // Activate flash after 2 s
+            if (!flashActive && held >= BTN_HOLD_MS) {
+                flashActive = true;
+                flashOn     = true;
+                flashLastMs = now;
+                relayState[holdBtnIdx] = true;
+                sendRelayCommand(holdBtnIdx+1, true);
+                drawOutputButton(holdBtnIdx);
+            }
+            // Toggle held flash every 500 ms
+            if (flashActive && (now - flashLastMs >= FLASH_PERIOD)) {
+                flashOn     = !flashOn;
+                flashLastMs = now;
+                relayState[holdBtnIdx] = flashOn;
+                sendRelayCommand(holdBtnIdx+1, flashOn);
+                drawOutputButton(holdBtnIdx);
+            }
+        }
+
+        // ---- Latched flash: each channel runs independently ----
+        for (int i = 0; i < OUTPUT_COUNT; i++) {
+            if (flashLatched[i] && (now - latchFlashLastMs[i] >= FLASH_PERIOD)) {
+                latchFlashOn[i]    = !latchFlashOn[i];
+                latchFlashLastMs[i] = now;
+                relayState[i]       = latchFlashOn[i];
+                sendRelayCommand(i+1, latchFlashOn[i]);
+                drawOutputButton(i);
+            }
+        }
+
+        // ---- Release a channel button ----
+        if (released && holdBtnIdx >= 0) {
+            if (flashActive) {
+                if (now - holdBtnStartMs >= BTN_HOLD_LATCH_MS) {
+                    // Held 4 s+: latch the flash, keep it going after release
+                    int b = holdBtnIdx;
+                    flashLatched[b]     = true;
+                    latchFlashOn[b]     = flashOn;
+                    latchFlashLastMs[b] = flashLastMs;
+                    flashActive         = false;
+                } else {
+                    // Held 2–4 s: stop flash, relay off
+                    flashActive            = false;
+                    relayState[holdBtnIdx] = false;
+                    sendRelayCommand(holdBtnIdx+1, false);
+                    drawOutputButton(holdBtnIdx);
+                }
+            } else {
+                // Short tap — normal toggle
+                relayState[holdBtnIdx] = !relayState[holdBtnIdx];
+                sendRelayCommand(holdBtnIdx+1, relayState[holdBtnIdx]);
+                drawOutputButton(holdBtnIdx);
+            }
+            holdBtnIdx = -1;
         }
         break;
 
