@@ -105,9 +105,9 @@ static bool holdActive         = false;
 static uint32_t holdStartMs    = 0;
 static int holdBarW            = 0;
 
-// ---- Button hold-to-flash (hold 2 s → flash while held; hold 4 s → latched flash) ----
-#define BTN_HOLD_MS        2000
-#define BTN_HOLD_LATCH_MS  4000
+// ---- Button hold-to-flash (hold 1 s → flash while held; hold 2 s → latched flash) ----
+#define BTN_HOLD_MS        1000
+#define BTN_HOLD_LATCH_MS  2000
 #define FLASH_PERIOD       375
 
 static int      holdBtnIdx     = -1;
@@ -118,6 +118,18 @@ static uint32_t flashLastMs    = 0;
 static bool     flashLatched[OUTPUT_COUNT]    = {};
 static bool     latchFlashOn[OUTPUT_COUNT]    = {};
 static uint32_t latchFlashLastMs[OUTPUT_COUNT] = {};
+
+// ---- Master strobe mode (hold Light Em Up 4 s) ----
+#define MASTER_STROBE_HOLD_MS  4000
+#define STROBE_ON_MS           120
+#define STROBE_OFF_MS           80
+
+static bool     masterHoldActive   = false;
+static uint32_t masterHoldStartMs  = 0;
+static bool     masterStrobeActive = false;
+static int      strobeChIdx        = 0;
+static uint32_t strobeLastMs       = 0;
+static bool     strobePhaseOn      = false;
 
 // ---- PIN ----
 static const char CORRECT_PIN[] = "111111";
@@ -701,15 +713,21 @@ void loop() {
                     break;
                 }
             }
-            // master buttons — fire immediately on press
+            // master buttons
             int halfW = (800 - BTN_X*2 - BTN_GAP) / 2;
             if (ty >= MASTER_Y && ty < MASTER_Y+MASTER_H) {
                 if (tx >= BTN_X && tx < BTN_X+halfW) {
+                    // Light Em Up — all ON immediately, start hold timer for strobe
+                    masterHoldActive   = true;
+                    masterHoldStartMs  = now;
+                    masterStrobeActive = false;
                     for (int i=0;i<OUTPUT_COUNT;i++) relayState[i]=true;
                     sendRelayCommand(0, true);
                     for (int i=0;i<OUTPUT_COUNT;i++) drawOutputButton(i);
                 } else {
-                    // Master Off — cancel all latched flashes
+                    // Master Off — cancel strobe and all latched flashes
+                    masterStrobeActive = false;
+                    masterHoldActive   = false;
                     for (int j=0;j<OUTPUT_COUNT;j++) {
                         flashLatched[j] = false;
                         latchFlashOn[j] = false;
@@ -751,6 +769,44 @@ void loop() {
                 relayState[i]       = latchFlashOn[i];
                 sendRelayCommand(i+1, latchFlashOn[i]);
                 drawOutputButton(i);
+            }
+        }
+
+        // ---- Light Em Up hold → master strobe at 4 s ----
+        if (fingerDown && masterHoldActive && !masterStrobeActive) {
+            if (now - masterHoldStartMs >= MASTER_STROBE_HOLD_MS) {
+                masterStrobeActive = true;
+                for (int i = 0; i < OUTPUT_COUNT; i++) {
+                    flashLatched[i] = false;
+                    latchFlashOn[i] = false;
+                    relayState[i]   = false;
+                }
+                sendRelayCommand(0, false);
+                strobeChIdx   = 0;
+                strobePhaseOn = true;
+                strobeLastMs  = now;
+                sendRelayCommand(1, true);
+                relayState[0] = true;
+                for (int i = 0; i < OUTPUT_COUNT; i++) drawOutputButton(i);
+            }
+        }
+        if (released && masterHoldActive) masterHoldActive = false;
+
+        // ---- Master strobe: sequential chase through all channels ----
+        if (masterStrobeActive) {
+            if (strobePhaseOn && (now - strobeLastMs) >= STROBE_ON_MS) {
+                sendRelayCommand(strobeChIdx + 1, false);
+                relayState[strobeChIdx] = false;
+                drawOutputButton(strobeChIdx);
+                strobePhaseOn = false;
+                strobeLastMs  = now;
+            } else if (!strobePhaseOn && (now - strobeLastMs) >= STROBE_OFF_MS) {
+                strobeChIdx   = (strobeChIdx + 1) % OUTPUT_COUNT;
+                strobePhaseOn = true;
+                strobeLastMs  = now;
+                sendRelayCommand(strobeChIdx + 1, true);
+                relayState[strobeChIdx] = true;
+                drawOutputButton(strobeChIdx);
             }
         }
 
