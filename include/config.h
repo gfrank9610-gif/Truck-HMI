@@ -7,8 +7,8 @@
 // ---- Serial ----
 #define DEBUG_BAUD    115200
 #define NANO_BAUD     9600
-#define NANO_RX       18    // GPIO18 → Serial2 RX  (connects to Nano TX)
-#define NANO_TX       17    // GPIO17 → Serial2 TX  (connects to Nano RX)
+#define NANO_RX       42    // GPIO42 → Serial2 RX  (connects to Nano TX/D1)
+#define NANO_TX       38    // GPIO38 → Serial2 TX  (connects to Nano RX/D0)
 
 // ---- Outputs ----
 #define OUTPUT_COUNT  6
