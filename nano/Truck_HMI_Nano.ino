@@ -16,7 +16,7 @@
  *    F1:1  -> Latched flash ON  ch1 (375ms strobe)
  *    F1:0  -> Latched flash OFF ch1
  *
- *  Relay Pins (Active LOW relay module -- LOW = relay ON):
+ *  Relay Pins (Active HIGH relay module -- HIGH = relay ON):
  *    Relay 1 (Fog Lights)     -> D2
  *    Relay 2 (Top Light Bar)  -> D3
  *    Relay 3 (Wheel Lights)   -> D4
@@ -38,7 +38,7 @@
 
 // Set true for standard opto-isolated relay modules (active LOW).
 // Set false only if your module is active HIGH.
-#define RELAY_ACTIVE_LOW true
+#define RELAY_ACTIVE_LOW false
 
 // Nano digital pins connected to relay IN1..IN6
 const uint8_t RELAY_PIN[RELAY_COUNT] = { 2, 3, 4, 5, 6, 7 };
