@@ -195,33 +195,14 @@ void updateFlash() {
 }
 
 // ================================================================
-//  STARTUP RELAY SELF-TEST
-//  Briefly energises then releases each relay in sequence so you
-//  can hear/see the clicks and confirm wiring before the HMI connects.
-// ================================================================
-
-void relaySelfTest() {
-  for (uint8_t i = 0; i < RELAY_COUNT; i++) {
-    setRelay(i, true);
-    updateStatusLED();
-    delay(120);
-    setRelay(i, false);
-    updateStatusLED();
-    delay(80);
-  }
-}
-
-// ================================================================
 //  SETUP
 // ================================================================
 
 void setup() {
-  // Initialise relay pins to safe OFF state first
   for (uint8_t i = 0; i < RELAY_COUNT; i++) {
     pinMode(RELAY_PIN[i], OUTPUT);
-    // Drive to OFF state immediately
     if (RELAY_ACTIVE_LOW) {
-      digitalWrite(RELAY_PIN[i], HIGH);  // HIGH = coil released = light OFF
+      digitalWrite(RELAY_PIN[i], HIGH);
     } else {
       digitalWrite(RELAY_PIN[i], LOW);
     }
@@ -233,10 +214,6 @@ void setup() {
   digitalWrite(STATUS_LED, LOW);
 
   Serial.begin(SERIAL_BAUD);
-
-  // Short pause then self-test: listen for the relay clicks at boot
-  delay(500);
-  relaySelfTest();
 }
 
 // ================================================================
