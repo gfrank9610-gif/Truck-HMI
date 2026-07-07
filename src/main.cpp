@@ -156,6 +156,7 @@ static const char PIN_CHARS[4][3] = {
 // ---- OSK ----
 static int  oskTargetIdx = -1;
 static char oskBuf[17]   = "";
+static bool oskShift     = true;  // true = uppercase
 
 // OSK key geometry
 //   Row 0 (QWERTYUIOP): 10 keys × 73 + 9 gaps × 6 = 784  → x0=8
@@ -175,11 +176,13 @@ static char oskBuf[17]   = "";
 #define OSK_BKSP_X  601
 #define OSK_BKSP_W  152
 #define OSK_CLR_W   130
-#define OSK_SPC_W   512
+#define OSK_SHIFT_W 130
+#define OSK_SPC_W   376
 #define OSK_DONE_W  130
 #define OSK_CLR_X   8
-#define OSK_SPC_X   144   // 8+130+6
-#define OSK_DONE_X  662   // 8+130+6+512+6
+#define OSK_SHIFT_X 144   // 8+130+6
+#define OSK_SPC_X   280   // 8+130+6+130+6
+#define OSK_DONE_X  662   // 8+130+6+130+6+376+6
 
 static const char OSK_R0[] = "QWERTYUIOP";
 static const char OSK_R1[] = "ASDFGHJKL";
@@ -492,7 +495,8 @@ void drawOskTextBox() {
 void drawOskRow(const char* keys, int nkeys, int x0, int y) {
     for (int i = 0; i < nkeys; i++) {
         int kx = x0 + i*(OSK_KEY_W+OSK_KEY_GAP);
-        char s[2] = {keys[i], '\0'};
+        char c = oskShift ? keys[i] : (char)(keys[i] + 32);
+        char s[2] = {c, '\0'};
         lcd.fillRoundRect(kx, y, OSK_KEY_W, OSK_KEY_H, 6, COLOR_DARK_PANEL);
         lcd.drawRoundRect(kx, y, OSK_KEY_W, OSK_KEY_H, 6, 0x2945);
         lcd.setFont(&FONT_BTN); lcd.setTextDatum(MC_DATUM);
@@ -524,24 +528,32 @@ void drawOskScreen() {
     lcd.setFont(&FONT_SMALL); lcd.setTextDatum(MC_DATUM); lcd.setTextColor(COLOR_DIM_GRAY);
     lcd.drawString("< DEL", OSK_BKSP_X+OSK_BKSP_W/2, OSK_R2_Y+OSK_KEY_H/2);
 
-    // Bottom row: CLR, SPACE, DONE
-    lcd.fillRoundRect(OSK_CLR_X,  OSK_R3_Y, OSK_CLR_W,  OSK_KEY_H, 6, COLOR_DARK_RED);
-    lcd.drawRoundRect(OSK_CLR_X,  OSK_R3_Y, OSK_CLR_W,  OSK_KEY_H, 6, COLOR_RED);
+    // Bottom row: CLR, SHIFT, SPACE, DONE
+    lcd.fillRoundRect(OSK_CLR_X,   OSK_R3_Y, OSK_CLR_W,   OSK_KEY_H, 6, COLOR_DARK_RED);
+    lcd.drawRoundRect(OSK_CLR_X,   OSK_R3_Y, OSK_CLR_W,   OSK_KEY_H, 6, COLOR_RED);
     lcd.setFont(&FONT_SMALL); lcd.setTextColor(COLOR_RED);
     lcd.drawString("CLR", OSK_CLR_X+OSK_CLR_W/2, OSK_R3_Y+OSK_KEY_H/2);
 
-    lcd.fillRoundRect(OSK_SPC_X,  OSK_R3_Y, OSK_SPC_W,  OSK_KEY_H, 6, COLOR_DARK_PANEL);
-    lcd.drawRoundRect(OSK_SPC_X,  OSK_R3_Y, OSK_SPC_W,  OSK_KEY_H, 6, 0x2945);
+    uint16_t shiftFill = oskShift ? COLOR_DARK_GREEN  : COLOR_DARK_PANEL;
+    uint16_t shiftBord = oskShift ? COLOR_NEON_GREEN  : COLOR_DIM_GRAY;
+    uint16_t shiftText = oskShift ? COLOR_NEON_GREEN  : COLOR_DIM_GRAY;
+    lcd.fillRoundRect(OSK_SHIFT_X, OSK_R3_Y, OSK_SHIFT_W, OSK_KEY_H, 6, shiftFill);
+    lcd.drawRoundRect(OSK_SHIFT_X, OSK_R3_Y, OSK_SHIFT_W, OSK_KEY_H, 6, shiftBord);
+    lcd.setTextColor(shiftText);
+    lcd.drawString(oskShift ? "ABC" : "abc", OSK_SHIFT_X+OSK_SHIFT_W/2, OSK_R3_Y+OSK_KEY_H/2);
+
+    lcd.fillRoundRect(OSK_SPC_X,   OSK_R3_Y, OSK_SPC_W,   OSK_KEY_H, 6, COLOR_DARK_PANEL);
+    lcd.drawRoundRect(OSK_SPC_X,   OSK_R3_Y, OSK_SPC_W,   OSK_KEY_H, 6, 0x2945);
     lcd.setTextColor(COLOR_DIM_GRAY);
     lcd.drawString("SPACE", OSK_SPC_X+OSK_SPC_W/2, OSK_R3_Y+OSK_KEY_H/2);
 
-    lcd.fillRoundRect(OSK_DONE_X, OSK_R3_Y, OSK_DONE_W, OSK_KEY_H, 6, COLOR_DARK_GREEN);
-    lcd.drawRoundRect(OSK_DONE_X, OSK_R3_Y, OSK_DONE_W, OSK_KEY_H, 6, COLOR_NEON_GREEN);
+    lcd.fillRoundRect(OSK_DONE_X,  OSK_R3_Y, OSK_DONE_W,  OSK_KEY_H, 6, COLOR_DARK_GREEN);
+    lcd.drawRoundRect(OSK_DONE_X,  OSK_R3_Y, OSK_DONE_W,  OSK_KEY_H, 6, COLOR_NEON_GREEN);
     lcd.setTextColor(COLOR_NEON_GREEN);
     lcd.drawString("DONE", OSK_DONE_X+OSK_DONE_W/2, OSK_R3_Y+OSK_KEY_H/2);
 }
 
-// Returns char, '\b'=backspace, '\x01'=CLR, '\x02'=DONE, ' '=space, 0=miss
+// Returns char, '\b'=backspace, '\x01'=CLR, '\x02'=DONE, '\x03'=SHIFT, ' '=space, 0=miss
 char oskHitTest(int tx, int ty) {
     if (ty >= OSK_R0_Y && ty < OSK_R0_Y+OSK_KEY_H) {
         for (int i = 0; i < 10; i++) {
@@ -563,9 +575,10 @@ char oskHitTest(int tx, int ty) {
         if (tx >= OSK_BKSP_X && tx < OSK_BKSP_X+OSK_BKSP_W) return '\b';
     }
     if (ty >= OSK_R3_Y && ty < OSK_R3_Y+OSK_KEY_H) {
-        if (tx >= OSK_CLR_X  && tx < OSK_CLR_X+OSK_CLR_W)   return '\x01';
-        if (tx >= OSK_SPC_X  && tx < OSK_SPC_X+OSK_SPC_W)   return ' ';
-        if (tx >= OSK_DONE_X && tx < OSK_DONE_X+OSK_DONE_W) return '\x02';
+        if (tx >= OSK_CLR_X   && tx < OSK_CLR_X+OSK_CLR_W)     return '\x01';
+        if (tx >= OSK_SHIFT_X && tx < OSK_SHIFT_X+OSK_SHIFT_W)  return '\x03';
+        if (tx >= OSK_SPC_X   && tx < OSK_SPC_X+OSK_SPC_W)     return ' ';
+        if (tx >= OSK_DONE_X  && tx < OSK_DONE_X+OSK_DONE_W)   return '\x02';
     }
     return 0;
 }
@@ -575,7 +588,11 @@ void handleOskTouch(int tx, int ty) {
     if (!c) return;
     int len = strlen(oskBuf);
 
-    if (c == '\x01') {
+    if (c == '\x03') {
+        oskShift = !oskShift;
+        drawOskScreen();
+        return;
+    } else if (c == '\x01') {
         oskBuf[0] = '\0';
     } else if (c == '\b') {
         if (len > 0) oskBuf[len-1] = '\0';
@@ -588,7 +605,8 @@ void handleOskTouch(int tx, int ty) {
         drawEngScreen();
         return;
     } else {
-        if (len < 16) { oskBuf[len] = c; oskBuf[len+1] = '\0'; }
+        char out = (c >= 'A' && c <= 'Z' && !oskShift) ? (char)(c + 32) : c;
+        if (len < 16) { oskBuf[len] = out; oskBuf[len+1] = '\0'; }
     }
     drawOskTextBox();
 }
