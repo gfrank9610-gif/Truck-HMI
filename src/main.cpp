@@ -55,7 +55,7 @@ LGFX lcd;
 #define COL_ORANGE  0xFD20
 
 // ---- State machine ----
-enum AppState { ST_MAIN, ST_PIN, ST_ENG, ST_OSK, ST_SAVER };
+enum AppState { ST_MAIN, ST_PIN, ST_ENG, ST_OSK, ST_SAVER, ST_VALET };
 static AppState appState = ST_MAIN;
 
 // ---- Serial ----
@@ -72,6 +72,7 @@ static const char* DEFAULT_LABELS[OUTPUT_COUNT] = {
 static char channelNames[OUTPUT_COUNT][17];
 static char engDraft[OUTPUT_COUNT][17];
 static Preferences prefs;
+static bool valetMode = false;   // declared early — used in loadLabels()
 
 void loadLabels() {
     prefs.begin("roc", true);
@@ -81,6 +82,7 @@ void loadLabels() {
         strncpy(channelNames[i], s.c_str(), 16);
         channelNames[i][16] = '\0';
     }
+    valetMode = prefs.getBool("valet", false);
     prefs.end();
 }
 
@@ -90,6 +92,12 @@ void saveLabels() {
         char key[4]; snprintf(key, sizeof(key), "c%d", i);
         prefs.putString(key, channelNames[i]);
     }
+    prefs.end();
+}
+
+void saveValet(bool on) {
+    prefs.begin("roc", false);
+    prefs.putBool("valet", on);
     prefs.end();
 }
 
@@ -124,6 +132,12 @@ static uint32_t flashLastMs    = 0;
 static bool     flashLatched[OUTPUT_COUNT]    = {};
 static bool     latchFlashOn[OUTPUT_COUNT]    = {};
 static uint32_t latchFlashLastMs[OUTPUT_COUNT] = {};
+
+// ---- Valet mode ----
+#define VALET_HOLD_MS          6000   // hold Master Off this long to lock
+static bool     masterOffHold   = false;
+static uint32_t masterOffHoldMs = 0;
+static int      masterOffBarW   = 0;
 
 // ---- Master strobe mode (hold Light Em Up 4 s) ----
 #define MASTER_STROBE_HOLD_MS  4000
@@ -319,9 +333,10 @@ void updateHoldProgress(int ty) {
 void drawPinDots(bool error = false) {
     int cx = 400, step = 46;
     int x0 = cx - step * 5 / 2;
+    uint16_t dotFill = valetMode ? COLOR_RED : COL_ORANGE;
     for (int i = 0; i < 6; i++) {
         int dx = x0 + i * step;
-        uint16_t col = error ? COLOR_RED : (i < pinLen ? COL_ORANGE : 0x2945);
+        uint16_t col = error ? COLOR_RED : (i < pinLen ? dotFill : 0x2945);
         if (i < pinLen || error) {
             lcd.fillCircle(dx, 115, 14, col);
         } else {
@@ -390,6 +405,86 @@ void handlePinTouch(int tx, int ty) {
                         }
                         appState = ST_ENG;
                         lcd.fillScreen(COLOR_BG);
+                    } else {
+                        drawPinDots(true);
+                        delay(800);
+                        pinLen = 0; pinEntry[0] = '\0';
+                        drawPinDots();
+                    }
+                }
+            }
+            return;
+        }
+    }
+}
+
+// ============================================================
+//  VALET LOCK SCREEN
+// ============================================================
+void drawValetScreen() {
+    lcd.fillScreen(COLOR_BG);
+
+    lcd.fillRect(0, 0, 800, 78, 0x3000);
+    lcd.setFont(&FONT_TITLE);
+    lcd.setTextDatum(MC_DATUM);
+    lcd.setTextColor(COLOR_RED);
+    lcd.drawString("VALET MODE - LOCKED", 400, 38);
+    lcd.drawFastHLine(0, 78, 800, COLOR_RED);
+
+    lcd.setFont(&FONT_SMALL);
+    lcd.setTextColor(COLOR_DIM_GRAY);
+    lcd.drawString("Enter password to unlock", 400, 92);
+
+    drawPinDots();
+
+    for (int r = 0; r < 4; r++) {
+        for (int c = 0; c < 3; c++) {
+            int kx = PKEY_X0 + c*(PKEY_W+PKEY_GAP);
+            int ky = PKEY_Y0 + r*(PKEY_H+PKEY_GAP);
+            char k = PIN_CHARS[r][c];
+            bool isCancel = (k == 'C');
+            uint16_t bdCol = isCancel ? 0x2945 : (k=='D' ? COLOR_DIM_GRAY : COLOR_RED);
+            uint16_t txCol = isCancel ? 0x2945 : (k=='D' ? COLOR_DIM_GRAY : COLOR_WHITE);
+            lcd.fillRoundRect(kx, ky, PKEY_W, PKEY_H, 8, COLOR_DARK_PANEL);
+            lcd.drawRoundRect(kx, ky, PKEY_W, PKEY_H, 8, bdCol);
+            lcd.setFont(&FONT_BTN);
+            lcd.setTextDatum(MC_DATUM);
+            lcd.setTextColor(txCol);
+            lcd.drawString(PIN_LABELS[r][c], kx+PKEY_W/2, ky+PKEY_H/2);
+        }
+    }
+}
+
+void handleValetTouch(int tx, int ty) {
+    for (int r = 0; r < 4; r++) {
+        for (int c = 0; c < 3; c++) {
+            int kx = PKEY_X0 + c*(PKEY_W+PKEY_GAP);
+            int ky = PKEY_Y0 + r*(PKEY_H+PKEY_GAP);
+            if (tx < kx || tx >= kx+PKEY_W || ty < ky || ty >= ky+PKEY_H) continue;
+
+            char k = PIN_CHARS[r][c];
+            if (k == 'C') {
+                // CANCEL disabled in valet — just clear entry, stay locked
+                pinLen = 0; pinEntry[0] = '\0';
+                drawPinDots();
+                return;
+            }
+            if (k == 'D') {
+                if (pinLen > 0) { pinLen--; pinEntry[pinLen] = '\0'; drawPinDots(); }
+                return;
+            }
+            if (pinLen < 6) {
+                pinEntry[pinLen++] = k;
+                pinEntry[pinLen]   = '\0';
+                drawPinDots();
+                if (pinLen == 6) {
+                    delay(200);
+                    if (strcmp(pinEntry, CORRECT_PIN) == 0) {
+                        valetMode = false;
+                        saveValet(false);
+                        pinLen = 0; pinEntry[0] = '\0';
+                        appState = ST_MAIN;
+                        drawMainScreen();
                     } else {
                         drawPinDots(true);
                         delay(800);
@@ -756,7 +851,13 @@ void setup() {
 
     playStartupAnimation(); // draws text in the dark, fades in, holds, fades out
 
-    drawMainScreen();       // draw ops screen in the dark
+    if (valetMode) {
+        pinLen = 0; pinEntry[0] = '\0';
+        appState = ST_VALET;
+        drawValetScreen();
+    } else {
+        drawMainScreen();
+    }
     blFade(0, 255, 500);   // smooth fade up to full brightness
 }
 
@@ -775,7 +876,7 @@ void loop() {
     int tx = touch_last_x, ty = touch_last_y;
 
     // ---- Screen saver: enter after 3 min idle ----
-    if (appState != ST_SAVER && (now - lastActivityMs) >= SAVER_TIMEOUT_MS) {
+    if (appState != ST_SAVER && appState != ST_VALET && (now - lastActivityMs) >= SAVER_TIMEOUT_MS) {
         preSaverState = appState;
         appState = ST_SAVER;
         initMatrix();
@@ -788,6 +889,7 @@ void loop() {
         if (appState == ST_PIN)   drawPinScreen();
         if (appState == ST_ENG)   drawEngScreen();
         if (appState == ST_OSK)   drawOskScreen();
+        if (appState == ST_VALET) drawValetScreen();
         // ST_SAVER and ST_MAIN handle their own draws
     }
 
@@ -856,6 +958,10 @@ void loop() {
                     for (int i=0;i<OUTPUT_COUNT;i++) relayState[i]=false;
                     sendRelayCommand(0, false);
                     for (int i=0;i<OUTPUT_COUNT;i++) drawOutputButton(i);
+                    // Start valet-hold timer
+                    masterOffHold   = true;
+                    masterOffHoldMs = now;
+                    masterOffBarW   = 0;
                 }
             }
         }
@@ -931,6 +1037,36 @@ void loop() {
             }
         }
 
+        // ---- Master Off hold → valet mode at 6 s ----
+        {
+            int halfW       = (800 - BTN_X*2 - BTN_GAP) / 2;
+            int masterOffRx = BTN_X + halfW + BTN_GAP;
+            if (fingerDown && masterOffHold) {
+                uint32_t held = now - masterOffHoldMs;
+                int newW = (int)((uint64_t)held * halfW / VALET_HOLD_MS);
+                if (newW > halfW) newW = halfW;
+                if (newW > masterOffBarW) {
+                    lcd.fillRect(masterOffRx, MASTER_Y + MASTER_H - 6, newW, 6, COL_ORANGE);
+                    masterOffBarW = newW;
+                }
+                if (held >= VALET_HOLD_MS) {
+                    masterOffHold = false;
+                    masterOffBarW = 0;
+                    valetMode = true;
+                    saveValet(true);
+                    pinLen = 0; pinEntry[0] = '\0';
+                    appState = ST_VALET;
+                }
+            }
+            if (released && masterOffHold) {
+                masterOffHold = false;
+                if (masterOffBarW > 0) {
+                    lcd.fillRect(masterOffRx, MASTER_Y + MASTER_H - 6, halfW, 6, COLOR_DARK_RED);
+                    masterOffBarW = 0;
+                }
+            }
+        }
+
         // ---- Release a channel button ----
         if (released && holdBtnIdx >= 0) {
             if (holdBtnIdx == MOMENTARY_CH) {
@@ -974,6 +1110,10 @@ void loop() {
 
     case ST_OSK:
         if (newTouch) handleOskTouch(tx, ty);
+        break;
+
+    case ST_VALET:
+        if (newTouch) handleValetTouch(tx, ty);
         break;
 
     case ST_SAVER:
