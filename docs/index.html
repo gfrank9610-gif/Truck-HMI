@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#000000">
+<title>ROD Light Control</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+body {
+  background: #0a0a0a;
+  color: #00e600;
+  font-family: Arial, sans-serif;
+  min-height: 100vh;
+  padding: 12px 12px 24px;
+  user-select: none;
+}
+h1 {
+  text-align: center;
+  font-size: 19px;
+  letter-spacing: 3px;
+  padding: 10px 0 3px;
+  color: #00ff00;
+  text-shadow: 0 0 12px #00ff0066;
+}
+.subtitle {
+  text-align: center;
+  font-size: 10px;
+  color: #444;
+  letter-spacing: 2px;
+  margin-bottom: 14px;
+}
+
+/* ---- BLE bar ---- */
+.ble-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #111;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  padding: 9px 12px;
+  margin-bottom: 14px;
+}
+.ble-status { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #888; }
+.ble-dot { width: 10px; height: 10px; border-radius: 50%; background: #333; flex-shrink: 0; }
+.ble-dot.on  { background: #00ff00; box-shadow: 0 0 7px #00ff00; }
+#conn-btn {
+  background: #001f00;
+  border: 1px solid #00aa00;
+  color: #00ff00;
+  padding: 7px 16px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: bold;
+  cursor: pointer;
+  letter-spacing: 1px;
+}
+#conn-btn.disc { background: #200000; border-color: #aa0000; color: #ff4444; }
+#conn-btn:active { filter: brightness(0.65); }
+
+/* ---- Channel grid ---- */
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+  margin-bottom: 10px;
+}
+.card {
+  background: #111;
+  border: 1px solid #2a2a2a;
+  border-radius: 10px;
+  padding: 10px 10px 8px;
+  transition: border-color .12s, background .12s;
+}
+.card.on  { background: #001600; border-color: #00bb00; }
+.ch-num   { font-size: 10px; color: #444; letter-spacing: 1px; margin-bottom: 1px; }
+.ch-name  {
+  font-size: 13px; font-weight: bold; color: #999;
+  margin-bottom: 8px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.card.on .ch-name { color: #00ff00; }
+.ch-btns  { display: flex; gap: 6px; }
+
+.tog {
+  flex: 1; padding: 8px 0;
+  border-radius: 6px;
+  border: 1px solid #2a2a2a;
+  background: #1a1a1a;
+  color: #555;
+  font-size: 12px; font-weight: bold;
+  cursor: pointer; text-align: center; letter-spacing: 1px;
+}
+.tog.on   { background: #002200; border-color: #00cc00; color: #00ff00; }
+.tog:active { filter: brightness(0.6); }
+
+.flash {
+  flex: 1; padding: 8px 0;
+  border-radius: 6px;
+  border: 1px solid #2a2a2a;
+  background: #1a1a1a;
+  color: #444;
+  font-size: 11px; font-weight: bold;
+  cursor: pointer; text-align: center; letter-spacing: 1px;
+}
+.flash.on  { background: #2a1400; border-color: #ff8800; color: #ff8800; }
+.flash:active { filter: brightness(0.6); }
+
+/* ---- Master row ---- */
+.master-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+  margin-bottom: 9px;
+}
+.mbtn {
+  padding: 17px;
+  border-radius: 10px;
+  font-size: 14px; font-weight: bold;
+  cursor: pointer; text-align: center; letter-spacing: 1px;
+  border: 2px solid;
+}
+.mbtn:active { filter: brightness(0.6); }
+.m-on  { background: #001800; border-color: #00cc00; color: #00ff00; }
+.m-off { background: #1a0000; border-color: #cc0000; color: #ff3333; }
+
+/* ---- Valet button ---- */
+.valet {
+  width: 100%; padding: 14px;
+  border-radius: 10px;
+  font-size: 14px; font-weight: bold;
+  cursor: pointer; text-align: center; letter-spacing: 1px;
+  border: 2px solid #bb4400;
+  background: #180800;
+  color: #ff6600;
+}
+.valet:active { filter: brightness(0.6); }
+
+/* ---- Disabled overlay ---- */
+.dim { pointer-events: none; opacity: 0.35; }
+
+/* ---- Valet lock screen ---- */
+#valet-screen {
+  display: none;
+  position: fixed; inset: 0;
+  background: #0a0000;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  gap: 20px;
+  padding: 24px;
+}
+#valet-screen.show { display: flex; }
+#valet-screen h2 { color: #ff0000; font-size: 22px; letter-spacing: 3px; text-align: center; }
+#valet-screen p  { color: #666; font-size: 13px; text-align: center; }
+
+footer { text-align: center; font-size: 10px; color: #2a2a2a; margin-top: 14px; letter-spacing: 1px; }
+</style>
+</head>
+<body>
+
+<h1>RIDE OR DIE CUSTOMS</h1>
+<div class="subtitle">LIGHT CONTROL SYSTEM</div>
+
+<div class="ble-bar">
+  <div class="ble-status">
+    <div class="ble-dot" id="dot"></div>
+    <span id="ble-lbl">Not connected</span>
+  </div>
+  <button id="conn-btn" onclick="toggleConnect()">CONNECT</button>
+</div>
+
+<div id="controls" class="dim">
+  <div class="grid" id="grid"></div>
+
+  <div class="master-row">
+    <div class="mbtn m-on"  onclick="masterOn()">&#9889; Light Em Up!</div>
+    <div class="mbtn m-off" onclick="masterOff()">&#10005; Master Off</div>
+  </div>
+
+  <div class="valet" onclick="valetLock()">&#128274; Lock — Valet Mode</div>
+</div>
+
+<!-- Shown when ESP32 reports valet mode is active -->
+<div id="valet-screen">
+  <h2>VALET MODE<br>LOCKED</h2>
+  <p>Enter the password on the touchscreen to unlock.</p>
+  <button id="conn-btn" onclick="toggleConnect()" style="padding:12px 28px;font-size:14px;">DISCONNECT</button>
+</div>
+
+<footer>ROD-LightCtrl &bull; BLE</footer>
+
+<script>
+'use strict';
+
+const SVC_UUID    = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
+const CMD_UUID    = 'beb5483e-36e1-4688-b7f5-ea07361b26a8';
+const STATUS_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+const LABELS_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
+const MOMENTARY   = 5;   // index 5 = Train Horn — press-only, no flash
+
+const enc = new TextEncoder();
+const dec = new TextDecoder();
+
+let device, cmdChr, connected = false;
+let relays  = new Array(6).fill(false);
+let flashes = new Array(6).fill(false);
+let names   = ['Ch 1','Ch 2','Ch 3','Ch 4','Ch 5','Ch 6'];
+
+// ---- Build / refresh channel grid ----
+function buildGrid() {
+  const g = document.getElementById('grid');
+  g.innerHTML = '';
+  for (let i = 0; i < 6; i++) {
+    const d = document.createElement('div');
+    d.className = 'card' + (relays[i] ? ' on' : '');
+    d.id = 'c' + i;
+    const noFlash = (i === MOMENTARY);
+    d.innerHTML =
+      '<div class="ch-num">CH ' + (i+1) + '</div>' +
+      '<div class="ch-name">' + esc(names[i]) + '</div>' +
+      '<div class="ch-btns">' +
+        '<div class="tog' + (relays[i]  ? ' on' : '') + '" onclick="togRelay(' + i + ')">' +
+          (relays[i] ? 'ON' : 'OFF') +
+        '</div>' +
+        (noFlash ? '' :
+          '<div class="flash' + (flashes[i] ? ' on' : '') + '" onclick="togFlash(' + i + ')">FLASH</div>'
+        ) +
+      '</div>';
+    g.appendChild(d);
+  }
+}
+
+function refreshCard(i) {
+  const d = document.getElementById('c' + i);
+  if (!d) return;
+  const noFlash = (i === MOMENTARY);
+  d.className = 'card' + (relays[i] ? ' on' : '');
+  d.innerHTML =
+    '<div class="ch-num">CH ' + (i+1) + '</div>' +
+    '<div class="ch-name">' + esc(names[i]) + '</div>' +
+    '<div class="ch-btns">' +
+      '<div class="tog' + (relays[i]  ? ' on' : '') + '" onclick="togRelay(' + i + ')">' +
+        (relays[i] ? 'ON' : 'OFF') +
+      '</div>' +
+      (noFlash ? '' :
+        '<div class="flash' + (flashes[i] ? ' on' : '') + '" onclick="togFlash(' + i + ')">FLASH</div>'
+      ) +
+    '</div>';
+}
+
+function esc(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ---- BLE write ----
+async function send(msg) {
+  if (!connected || !cmdChr) return;
+  try { await cmdChr.writeValueWithoutResponse(enc.encode(msg)); }
+  catch(e) { console.warn('BLE write:', e); }
+}
+
+// ---- Channel actions ----
+async function togRelay(i) {
+  const next = !relays[i];
+  relays[i]  = next;
+  flashes[i] = false;
+  refreshCard(i);
+  await send('R' + (i+1) + ':' + (next ? 1 : 0));
+}
+
+async function togFlash(i) {
+  if (i === MOMENTARY) return;
+  const next  = !flashes[i];
+  flashes[i]  = next;
+  if (next) relays[i] = true;
+  refreshCard(i);
+  await send('F' + (i+1) + ':' + (next ? 1 : 0));
+}
+
+async function masterOn() {
+  relays.fill(true); relays[MOMENTARY] = false;
+  flashes.fill(false);
+  buildGrid();
+  await send('R0:1');
+}
+
+async function masterOff() {
+  relays.fill(false); flashes.fill(false);
+  buildGrid();
+  await send('R0:0');
+}
+
+async function valetLock() {
+  if (!confirm('Lock in Valet Mode?\n\nUnlock requires password on the touchscreen.')) return;
+  await send('VALET:1');
+}
+
+// ---- Status notification parser ----
+function onStatus(evt) {
+  const s = dec.decode(evt.target.value);
+  const r = s.match(/R:(\d{6})/);
+  const f = s.match(/F:(\d{6})/);
+  const v = s.match(/V:(\d)/);
+  if (r) for (let i=0;i<6;i++) relays[i]  = r[1][i]==='1';
+  if (f) for (let i=0;i<6;i++) flashes[i] = f[1][i]==='1';
+  buildGrid();
+  // Show/hide valet lock screen
+  const locked = v && v[1]==='1';
+  document.getElementById('valet-screen').className = locked ? 'show' : '';
+}
+
+// ---- Connection management ----
+function setUI(on, label) {
+  connected = on;
+  document.getElementById('dot').className    = 'ble-dot' + (on ? ' on' : '');
+  document.getElementById('ble-lbl').textContent = label || 'Not connected';
+  document.getElementById('conn-btn').textContent = on ? 'DISCONNECT' : 'CONNECT';
+  document.getElementById('conn-btn').className   = on ? 'disc' : '';
+  document.getElementById('controls').className   = on ? '' : 'dim';
+  if (!on) {
+    relays.fill(false); flashes.fill(false);
+    buildGrid();
+    document.getElementById('valet-screen').className = '';
+  }
+}
+
+async function connect() {
+  if (!navigator.bluetooth) {
+    alert('Web Bluetooth is not supported.\nUse Chrome on Android.');
+    return;
+  }
+  try {
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [SVC_UUID] }]
+    });
+    device.addEventListener('gattserverdisconnected', () => setUI(false));
+
+    const server  = await device.gatt.connect();
+    const svc     = await server.getPrimaryService(SVC_UUID);
+    cmdChr        = await svc.getCharacteristic(CMD_UUID);
+
+    const stChr   = await svc.getCharacteristic(STATUS_UUID);
+    await stChr.startNotifications();
+    stChr.addEventListener('characteristicvaluechanged', onStatus);
+
+    const lblChr  = await svc.getCharacteristic(LABELS_UUID);
+    const raw     = await lblChr.readValue();
+    const parts   = dec.decode(raw).split('|');
+    if (parts.length === 6) names = parts;
+
+    // Initial status read
+    const stVal = await stChr.readValue();
+    onStatus({ target: { value: stVal } });
+
+    setUI(true, device.name || 'ROD-LightCtrl');
+  } catch(e) {
+    if (e.name !== 'NotFoundError') alert('Connection failed:\n' + e.message);
+  }
+}
+
+function disconnect() {
+  if (device && device.gatt.connected) device.gatt.disconnect();
+  setUI(false);
+}
+
+function toggleConnect() { connected ? disconnect() : connect(); }
+
+// ---- Init ----
+buildGrid();
+</script>
+</body>
+</html>

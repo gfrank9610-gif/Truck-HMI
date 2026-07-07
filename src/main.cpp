@@ -833,6 +833,176 @@ void updateMatrix() {
 }
 
 // ============================================================
+//  BLE  (NimBLE-Arduino — runs on its own FreeRTOS task)
+// ============================================================
+#include <NimBLEDevice.h>
+
+#define BLE_DEVICE_NAME  "ROD-LightCtrl"
+#define BLE_SVC_UUID     "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define BLE_CMD_UUID     "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+#define BLE_STATUS_UUID  "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
+#define BLE_LABELS_UUID  "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
+
+static NimBLECharacteristic* bleStatusChr = nullptr;
+static NimBLECharacteristic* bleLabelsChr = nullptr;
+static bool                  bleConnected = false;
+
+// Thread-safe handoff: BLE task writes, main loop reads
+static volatile bool blePendingCmd = false;
+static char          bleCmdBuf[32] = {};
+static portMUX_TYPE  bleMux        = portMUX_INITIALIZER_UNLOCKED;
+static char          lastBleStatus[48] = {};   // dedup — only notify on change
+
+// ---- Server callbacks ----
+class BLEServerCB : public NimBLEServerCallbacks {
+    void onConnect(NimBLEServer*) override {
+        bleConnected = true;
+        lastBleStatus[0] = '\0';   // force immediate status push on connect
+    }
+    void onDisconnect(NimBLEServer*) override {
+        bleConnected = false;
+        NimBLEDevice::startAdvertising();
+    }
+};
+
+// ---- Command characteristic callbacks ----
+class BLECmdCB : public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic* c) override {
+        std::string v = c->getValue();
+        if (v.size() > 0 && v.size() < 32) {
+            portENTER_CRITICAL(&bleMux);
+            strncpy(bleCmdBuf, v.c_str(), 31);
+            bleCmdBuf[31] = '\0';
+            blePendingCmd = true;
+            portEXIT_CRITICAL(&bleMux);
+        }
+    }
+};
+
+// ---- Notify phone of current state (deduped) ----
+void notifyBleStatus() {
+    if (!bleConnected || !bleStatusChr) return;
+    char buf[48];
+    snprintf(buf, sizeof(buf), "R:%d%d%d%d%d%d F:%d%d%d%d%d%d V:%d S:%d",
+        relayState[0]?1:0, relayState[1]?1:0, relayState[2]?1:0,
+        relayState[3]?1:0, relayState[4]?1:0, relayState[5]?1:0,
+        flashLatched[0]?1:0, flashLatched[1]?1:0, flashLatched[2]?1:0,
+        flashLatched[3]?1:0, flashLatched[4]?1:0, flashLatched[5]?1:0,
+        valetMode ? 1 : 0, masterStrobeActive ? 1 : 0);
+    if (strcmp(buf, lastBleStatus) == 0) return;
+    strncpy(lastBleStatus, buf, sizeof(lastBleStatus));
+    bleStatusChr->setValue(buf);
+    bleStatusChr->notify();
+}
+
+// ---- Process a command received from the phone ----
+void processBleCommand(const char* cmd) {
+    // VALET:1 — lock from phone
+    if (strncmp(cmd, "VALET:1", 7) == 0) {
+        valetMode = true;
+        saveValet(true);
+        for (int i = 0; i < OUTPUT_COUNT; i++) {
+            relayState[i]   = false;
+            flashLatched[i] = false;
+            latchFlashOn[i] = false;
+        }
+        masterStrobeActive = false;
+        masterHoldActive   = false;
+        sendRelayCommand(0, false);
+        pinLen = 0; pinEntry[0] = '\0';
+        appState = ST_VALET;
+        notifyBleStatus();
+        return;
+    }
+
+    // R#:# or F#:# commands (4 chars minimum, colon at position 2)
+    if (strlen(cmd) < 4 || cmd[2] != ':') return;
+    char type = cmd[0];
+    int  ch   = cmd[1] - '0';
+    int  val  = cmd[3] - '0';
+    if (val < 0 || val > 1) return;
+
+    if (type == 'R') {
+        if (ch == 0) {
+            // Master on/off
+            masterStrobeActive = false;
+            masterHoldActive   = false;
+            for (int i = 0; i < OUTPUT_COUNT; i++) {
+                flashLatched[i] = false;
+                latchFlashOn[i] = false;
+                if (val == 1 && i == MOMENTARY_CH) continue;
+                relayState[i] = (val == 1);
+            }
+            sendRelayCommand(0, val == 1);
+            if (appState == ST_MAIN)
+                for (int i = 0; i < OUTPUT_COUNT; i++) drawOutputButton(i);
+        } else if (ch >= 1 && ch <= OUTPUT_COUNT) {
+            int idx = ch - 1;
+            if (idx == MOMENTARY_CH) return;   // momentary not controllable via BLE
+            flashLatched[idx] = false;
+            latchFlashOn[idx] = false;
+            relayState[idx]   = (val == 1);
+            sendRelayCommand(ch, val == 1);
+            if (appState == ST_MAIN) drawOutputButton(idx);
+        }
+    } else if (type == 'F') {
+        if (ch >= 1 && ch <= OUTPUT_COUNT && (ch-1) != MOMENTARY_CH) {
+            int idx = ch - 1;
+            if (val == 1) {
+                flashLatched[idx]     = true;
+                latchFlashOn[idx]     = true;
+                latchFlashLastMs[idx] = millis();
+                relayState[idx]       = true;
+                NANO_SERIAL.printf("F%d:1\n", ch);
+            } else {
+                flashLatched[idx] = false;
+                latchFlashOn[idx] = false;
+                relayState[idx]   = false;
+                sendRelayCommand(ch, false);
+            }
+            if (appState == ST_MAIN) drawOutputButton(idx);
+        }
+    }
+    notifyBleStatus();
+}
+
+// ---- One-time BLE initialisation ----
+void initBLE() {
+    NimBLEDevice::init(BLE_DEVICE_NAME);
+    NimBLEDevice::setPower(ESP_PWR_LVL_P9);
+
+    NimBLEServer* srv = NimBLEDevice::createServer();
+    srv->setCallbacks(new BLEServerCB());
+
+    NimBLEService* svc = srv->createService(BLE_SVC_UUID);
+
+    NimBLECharacteristic* cmdChr = svc->createCharacteristic(
+        BLE_CMD_UUID, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR);
+    cmdChr->setCallbacks(new BLECmdCB());
+
+    bleStatusChr = svc->createCharacteristic(
+        BLE_STATUS_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
+
+    bleLabelsChr = svc->createCharacteristic(
+        BLE_LABELS_UUID, NIMBLE_PROPERTY::READ);
+
+    // Seed label characteristic with current names
+    char lbl[128] = {};
+    for (int i = 0; i < OUTPUT_COUNT; i++) {
+        if (i > 0) strncat(lbl, "|", sizeof(lbl)-strlen(lbl)-1);
+        strncat(lbl, channelNames[i], sizeof(lbl)-strlen(lbl)-1);
+    }
+    bleLabelsChr->setValue(lbl);
+
+    svc->start();
+
+    NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
+    adv->addServiceUUID(BLE_SVC_UUID);
+    adv->setScanResponse(true);
+    adv->start();
+}
+
+// ============================================================
 //  SETUP / LOOP
 // ============================================================
 static uint32_t lastTouchMs = 0;
@@ -841,6 +1011,7 @@ void setup() {
     Serial.begin(DEBUG_BAUD);
     NANO_SERIAL.begin(NANO_BAUD, SERIAL_8N1, NANO_RX, NANO_TX);
     loadLabels();
+    initBLE();
     ledcSetup(BL_LEDC_CHAN, BL_LEDC_FREQ, BL_LEDC_BITS);
     ledcAttachPin(TFT_BL, BL_LEDC_CHAN);
     blSet(0);              // backlight off while display initialises
@@ -863,6 +1034,16 @@ void setup() {
 
 void loop() {
     uint32_t now = millis();
+
+    // ---- Drain BLE command queue (written by NimBLE task) ----
+    if (blePendingCmd) {
+        portENTER_CRITICAL(&bleMux);
+        char cmd[32];
+        memcpy(cmd, (char*)bleCmdBuf, 32);
+        blePendingCmd = false;
+        portEXIT_CRITICAL(&bleMux);
+        processBleCommand(cmd);
+    }
 
     // GT911 only reports at ~100Hz; the loop runs much faster.
     // Use a 150ms sticky window so a missed poll doesn't cancel the hold timer.
@@ -1132,5 +1313,6 @@ void loop() {
         break;
     }
 
+    notifyBleStatus();   // deduped — only sends if state changed and phone is connected
     while (NANO_SERIAL.available()) NANO_SERIAL.read();
 }
