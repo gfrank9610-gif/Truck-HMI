@@ -661,6 +661,77 @@ void playStartupAnimation() {
 }
 
 // ============================================================
+//  MATRIX RAIN SCREEN SAVER
+// ============================================================
+#define MTX_CW   12               // cell width  (px) — 6×8 font at size 2
+#define MTX_CH   16               // cell height (px)
+#define MTX_COLS (800 / MTX_CW)  // 66 columns
+#define MTX_ROWS (480 / MTX_CH)  // 30 rows
+
+struct MtxCol {
+    int16_t  head;
+    uint8_t  tail;
+    uint16_t speedMs;
+    uint32_t nextMs;
+};
+static MtxCol mtx[MTX_COLS];
+
+// Green fade palette: index 0 = head (white), ascending = dimmer
+static const uint16_t MTX_PAL[] = {
+    0xFFFF, 0x67E0, 0x07E0, 0x0580, 0x0360, 0x01A0, 0x00C0, 0x0060
+};
+#define MTX_PAL_SZ 8
+
+static char mtxRandChar() {
+    static const char pool[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%&*<>?/";
+    return pool[random(sizeof(pool) - 1)];
+}
+
+void initMatrix() {
+    lcd.fillScreen(0x0000);
+    for (int i = 0; i < MTX_COLS; i++) {
+        mtx[i].head    = -(int16_t)random(MTX_ROWS);
+        mtx[i].tail    = 4 + random(10);
+        mtx[i].speedMs = 40 + random(120);
+        mtx[i].nextMs  = millis() + random(3000);
+    }
+}
+
+void updateMatrix() {
+    uint32_t now = millis();
+    for (int i = 0; i < MTX_COLS; i++) {
+        if (now < mtx[i].nextMs) continue;
+        mtx[i].nextMs = now + mtx[i].speedMs;
+
+        int16_t h = mtx[i].head;
+        int     t = mtx[i].tail;
+        int     x = i * MTX_CW;
+
+        // Draw from tail up to head so head char overwrites tail
+        for (int j = t; j >= 0; j--) {
+            int row = h - j;
+            if (row < 0 || row >= MTX_ROWS) continue;
+            int pal = (j == 0) ? 0 : min(j, MTX_PAL_SZ - 1);
+            lcd.drawChar(x, row * MTX_CH, mtxRandChar(), MTX_PAL[pal], (uint16_t)0x0000, 2);
+        }
+
+        // Erase cell just behind the tail
+        int eraseRow = h - t - 1;
+        if (eraseRow >= 0 && eraseRow < MTX_ROWS)
+            lcd.fillRect(x, eraseRow * MTX_CH, MTX_CW, MTX_CH, 0x0000);
+
+        mtx[i].head++;
+
+        // Reset column once tail has scrolled off screen
+        if (h - t > MTX_ROWS) {
+            mtx[i].head    = -(int16_t)random(MTX_ROWS / 2);
+            mtx[i].tail    = 4 + random(10);
+            mtx[i].speedMs = 40 + random(120);
+        }
+    }
+}
+
+// ============================================================
 //  SETUP / LOOP
 // ============================================================
 static uint32_t lastTouchMs = 0;
@@ -701,8 +772,7 @@ void loop() {
     if (appState != ST_SAVER && (now - lastActivityMs) >= SAVER_TIMEOUT_MS) {
         preSaverState = appState;
         appState = ST_SAVER;
-        lcd.fillScreen(0x0000);
-        blFade(255, 0, 600);
+        initMatrix();
     }
 
     // Deferred screen draws (after state change inside handlers)
@@ -901,12 +971,13 @@ void loop() {
         break;
 
     case ST_SAVER:
+        updateMatrix();
         if (newTouch) {
             appState = preSaverState;
             lastActivityMs = now;
-            lastDrawnState = ST_SAVER; // force deferred draw to fire
-            blFade(0, 255, 300);
-            if (preSaverState == ST_MAIN)    drawMainScreen();
+            lastDrawnState = ST_SAVER;
+            lcd.fillScreen(COLOR_BG);
+            if (preSaverState == ST_MAIN)     drawMainScreen();
             else if (preSaverState == ST_PIN) drawPinScreen();
             else if (preSaverState == ST_ENG) drawEngScreen();
             else if (preSaverState == ST_OSK) drawOskScreen();
