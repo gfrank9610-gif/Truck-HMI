@@ -974,10 +974,11 @@ void processBleCommand(const char* cmd) {
                 for (int i = 0; i < OUTPUT_COUNT; i++) drawOutputButton(i);
         } else if (ch >= 1 && ch <= OUTPUT_COUNT) {
             int idx = ch - 1;
-            if (idx == MOMENTARY_CH) return;   // momentary not controllable via BLE
-            flashLatched[idx] = false;
-            latchFlashOn[idx] = false;
-            relayState[idx]   = (val == 1);
+            if (idx != MOMENTARY_CH) {
+                flashLatched[idx] = false;
+                latchFlashOn[idx] = false;
+            }
+            relayState[idx] = (val == 1);
             sendRelayCommand(ch, val == 1);
             if (appState == ST_MAIN) drawOutputButton(idx);
         }

@@ -241,10 +241,8 @@ function cardHTML(i) {
       '<div class="ch-num">CH ' + (i+1) + '</div>' +
       '<div class="ch-name">' + esc(names[i]) + '</div>' +
       '<div class="ch-btns">' +
-        '<div class="tog momentary-btn' + (relays[i] ? ' on' : '') + '" ' +
-          'ontouchstart="hornPress(event)" ontouchend="hornRelease(event)" ontouchcancel="hornRelease(event)" ' +
-          'onmousedown="hornPress(event)" onmouseup="hornRelease(event)">' +
-          (relays[i] ? 'HONKING' : 'HOLD') +
+        '<div class="tog momentary-btn' + (relays[i] ? ' on' : '') + '" onclick="hornBurst()">' +
+          (relays[i] ? 'HONKING!' : 'HONK') +
         '</div>' +
       '</div>'
     );
@@ -300,32 +298,17 @@ async function togRelay(i) {
   await send('R' + (i+1) + ':' + (next ? 1 : 0));
 }
 
-async function hornPress(e) {
-  e.preventDefault();
+async function hornBurst() {
   if (!connected) return;
+  // Visual feedback
   relays[MOMENTARY] = true;
-  // Update appearance in-place — do NOT call refreshCard (would destroy the
-  // touch target mid-gesture, preventing touchend from firing)
-  const card = document.getElementById('c' + MOMENTARY);
-  if (card) {
-    card.classList.add('on');
-    const btn = card.querySelector('.momentary-btn');
-    if (btn) { btn.classList.add('on'); btn.textContent = 'HONKING'; }
-  }
+  refreshCard(MOMENTARY);
   await send('R6:1');
-}
-
-async function hornRelease(e) {
-  e.preventDefault();
-  if (!connected || !relays[MOMENTARY]) return;
-  relays[MOMENTARY] = false;
-  const card = document.getElementById('c' + MOMENTARY);
-  if (card) {
-    card.classList.remove('on');
-    const btn = card.querySelector('.momentary-btn');
-    if (btn) { btn.classList.remove('on'); btn.textContent = 'HOLD'; }
-  }
-  await send('R6:0');
+  setTimeout(async () => {
+    relays[MOMENTARY] = false;
+    refreshCard(MOMENTARY);
+    await send('R6:0');
+  }, 500);
 }
 
 async function togFlash(i) {
