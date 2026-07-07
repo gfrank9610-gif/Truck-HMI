@@ -1122,6 +1122,7 @@ void loop() {
             appState = preSaverState;
             lastActivityMs = now;
             lastDrawnState = ST_SAVER;
+            lcd.setTextSize(1);   // matrix rain leaves size=2; reset before redraw
             lcd.fillScreen(COLOR_BG);
             if (preSaverState == ST_MAIN)     drawMainScreen();
             else if (preSaverState == ST_PIN) drawPinScreen();
