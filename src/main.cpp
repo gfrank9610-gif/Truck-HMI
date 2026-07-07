@@ -676,9 +676,9 @@ struct MtxCol {
 };
 static MtxCol mtx[MTX_COLS];
 
-// Green fade palette: index 0 = head (white), ascending = dimmer
+// Green fade palette — no white, pure green shades head to tail
 static const uint16_t MTX_PAL[] = {
-    0xFFFF, 0x67E0, 0x07E0, 0x0580, 0x0360, 0x01A0, 0x00C0, 0x0060
+    0x07E0, 0x05C0, 0x03E0, 0x0280, 0x0180, 0x00C0, 0x0060, 0x0020
 };
 #define MTX_PAL_SZ 8
 
@@ -689,6 +689,8 @@ static char mtxRandChar() {
 
 void initMatrix() {
     lcd.fillScreen(0x0000);
+    lcd.setFont(nullptr);   // built-in fixed font, no bg fill in transparent mode
+    lcd.setTextSize(2);
     for (int i = 0; i < MTX_COLS; i++) {
         mtx[i].head    = -(int16_t)random(MTX_ROWS);
         mtx[i].tail    = 4 + random(10);
@@ -699,6 +701,9 @@ void initMatrix() {
 
 void updateMatrix() {
     uint32_t now = millis();
+    lcd.setFont(nullptr);
+    lcd.setTextSize(2);
+
     for (int i = 0; i < MTX_COLS; i++) {
         if (now < mtx[i].nextMs) continue;
         mtx[i].nextMs = now + mtx[i].speedMs;
@@ -707,22 +712,23 @@ void updateMatrix() {
         int     t = mtx[i].tail;
         int     x = i * MTX_CW;
 
-        // Draw from tail up to head so head char overwrites tail
+        // Draw tail top-to-bottom; head drawn last so it wins
         for (int j = t; j >= 0; j--) {
             int row = h - j;
             if (row < 0 || row >= MTX_ROWS) continue;
-            int pal = (j == 0) ? 0 : min(j, MTX_PAL_SZ - 1);
-            lcd.drawChar(x, row * MTX_CH, mtxRandChar(), MTX_PAL[pal], (uint16_t)0x0000, 2);
+            // Single-arg setTextColor = transparent bg (no black rectangle fill)
+            lcd.setTextColor(MTX_PAL[min(j, MTX_PAL_SZ - 1)]);
+            lcd.setCursor(x, row * MTX_CH);
+            lcd.print(mtxRandChar());
         }
 
-        // Erase cell just behind the tail
+        // Erase the cell just past the tail end
         int eraseRow = h - t - 1;
         if (eraseRow >= 0 && eraseRow < MTX_ROWS)
             lcd.fillRect(x, eraseRow * MTX_CH, MTX_CW, MTX_CH, 0x0000);
 
         mtx[i].head++;
 
-        // Reset column once tail has scrolled off screen
         if (h - t > MTX_ROWS) {
             mtx[i].head    = -(int16_t)random(MTX_ROWS / 2);
             mtx[i].tail    = 4 + random(10);
