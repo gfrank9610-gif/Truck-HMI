@@ -152,8 +152,8 @@ static uint32_t strobeLastMs       = 0;
 static bool     strobePhaseOn      = false;
 
 // ---- PIN ----
-static const char CORRECT_PIN[] = "111111";
-static char pinEntry[7] = "";
+static const char CORRECT_PIN[] = "4852";
+static char pinEntry[5] = "";
 static int  pinLen      = 0;
 
 // PIN key grid: 3 cols × 4 rows, centred on 800 px
@@ -332,9 +332,9 @@ void updateHoldProgress(int ty) {
 // ============================================================
 void drawPinDots(bool error = false) {
     int cx = 400, step = 46;
-    int x0 = cx - step * 5 / 2;
+    int x0 = cx - step * 3 / 2;
     uint16_t dotFill = valetMode ? COLOR_RED : COL_ORANGE;
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < 4; i++) {
         int dx = x0 + i * step;
         uint16_t col = error ? COLOR_RED : (i < pinLen ? dotFill : 0x2945);
         if (i < pinLen || error) {
@@ -392,11 +392,11 @@ void handlePinTouch(int tx, int ty) {
                 if (pinLen > 0) { pinLen--; pinEntry[pinLen] = '\0'; drawPinDots(); }
                 return;
             }
-            if (pinLen < 6) {
+            if (pinLen < 4) {
                 pinEntry[pinLen++] = k;
                 pinEntry[pinLen]   = '\0';
                 drawPinDots();
-                if (pinLen == 6) {
+                if (pinLen == 4) {
                     delay(200);
                     if (strcmp(pinEntry, CORRECT_PIN) == 0) {
                         for (int i = 0; i < OUTPUT_COUNT; i++) {
@@ -473,11 +473,11 @@ void handleValetTouch(int tx, int ty) {
                 if (pinLen > 0) { pinLen--; pinEntry[pinLen] = '\0'; drawPinDots(); }
                 return;
             }
-            if (pinLen < 6) {
+            if (pinLen < 4) {
                 pinEntry[pinLen++] = k;
                 pinEntry[pinLen]   = '\0';
                 drawPinDots();
-                if (pinLen == 6) {
+                if (pinLen == 4) {
                     delay(200);
                     if (strcmp(pinEntry, CORRECT_PIN) == 0) {
                         valetMode = false;
