@@ -727,12 +727,15 @@ void loop() {
             int halfW = (800 - BTN_X*2 - BTN_GAP) / 2;
             if (ty >= MASTER_Y && ty < MASTER_Y+MASTER_H) {
                 if (tx >= BTN_X && tx < BTN_X+halfW) {
-                    // Light Em Up — all ON immediately, start hold timer for strobe
+                    // Light Em Up — all ON except momentary ch6, start hold timer for strobe
                     masterHoldActive   = true;
                     masterHoldStartMs  = now;
                     masterStrobeActive = false;
-                    for (int i=0;i<OUTPUT_COUNT;i++) relayState[i]=true;
-                    sendRelayCommand(0, true);
+                    for (int i=0;i<OUTPUT_COUNT;i++) {
+                        if (i == MOMENTARY_CH) continue;
+                        relayState[i] = true;
+                        sendRelayCommand(i+1, true);
+                    }
                     for (int i=0;i<OUTPUT_COUNT;i++) drawOutputButton(i);
                 } else {
                     // Master Off — cancel strobe and all latched flashes
