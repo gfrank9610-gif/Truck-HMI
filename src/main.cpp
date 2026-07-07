@@ -693,7 +693,7 @@ void initMatrix() {
     lcd.setTextSize(2);
     for (int i = 0; i < MTX_COLS; i++) {
         mtx[i].head    = -(int16_t)random(MTX_ROWS);
-        mtx[i].tail    = 4 + random(10);
+        mtx[i].tail    = 10 + random(MTX_ROWS - 6);
         mtx[i].speedMs = 40 + random(120);
         mtx[i].nextMs  = millis() + random(3000);
     }
@@ -731,7 +731,7 @@ void updateMatrix() {
 
         if (h - t > MTX_ROWS) {
             mtx[i].head    = -(int16_t)random(MTX_ROWS / 2);
-            mtx[i].tail    = 4 + random(10);
+            mtx[i].tail    = 10 + random(MTX_ROWS - 6);
             mtx[i].speedMs = 40 + random(120);
         }
     }
