@@ -55,7 +55,7 @@ LGFX lcd;
 #define COL_ORANGE  0xFD20
 
 // ---- State machine ----
-enum AppState { ST_MAIN, ST_PIN, ST_ENG, ST_OSK };
+enum AppState { ST_MAIN, ST_PIN, ST_ENG, ST_OSK, ST_SAVER };
 static AppState appState = ST_MAIN;
 
 // ---- Serial ----
@@ -92,6 +92,11 @@ void saveLabels() {
     }
     prefs.end();
 }
+
+// ---- Screen saver ----
+#define SAVER_TIMEOUT_MS (3UL * 60UL * 1000UL)  // 3 minutes
+static uint32_t lastActivityMs = 0;
+static AppState preSaverState  = ST_MAIN;
 
 // ---- Hold-to-enter (long press header 4 s) ----
 #define HOLD_MS          4000
@@ -684,7 +689,7 @@ void loop() {
     // GT911 only reports at ~100Hz; the loop runs much faster.
     // Use a 150ms sticky window so a missed poll doesn't cancel the hold timer.
     bool rawTouch = touch_has_signal() && touch_touched();
-    if (rawTouch) lastRawTouchMs = now;
+    if (rawTouch) { lastRawTouchMs = now; lastActivityMs = now; }
 
     bool wasDown   = fingerDown;
     fingerDown     = rawTouch || (now - lastRawTouchMs < FINGER_UP_MS);
@@ -692,13 +697,22 @@ void loop() {
     bool released  = !fingerDown && wasDown;
     int tx = touch_last_x, ty = touch_last_y;
 
+    // ---- Screen saver: enter after 3 min idle ----
+    if (appState != ST_SAVER && (now - lastActivityMs) >= SAVER_TIMEOUT_MS) {
+        preSaverState = appState;
+        appState = ST_SAVER;
+        lcd.fillScreen(0x0000);
+        blFade(255, 0, 600);
+    }
+
     // Deferred screen draws (after state change inside handlers)
     static AppState lastDrawnState = ST_MAIN;
     if (appState != lastDrawnState) {
         lastDrawnState = appState;
-        if (appState == ST_PIN) drawPinScreen();
-        if (appState == ST_ENG) drawEngScreen();
-        if (appState == ST_OSK) drawOskScreen();
+        if (appState == ST_PIN)   drawPinScreen();
+        if (appState == ST_ENG)   drawEngScreen();
+        if (appState == ST_OSK)   drawOskScreen();
+        // ST_SAVER and ST_MAIN handle their own draws
     }
 
     switch (appState) {
@@ -884,6 +898,19 @@ void loop() {
 
     case ST_OSK:
         if (newTouch) handleOskTouch(tx, ty);
+        break;
+
+    case ST_SAVER:
+        if (newTouch) {
+            appState = preSaverState;
+            lastActivityMs = now;
+            lastDrawnState = ST_SAVER; // force deferred draw to fire
+            blFade(0, 255, 300);
+            if (preSaverState == ST_MAIN)    drawMainScreen();
+            else if (preSaverState == ST_PIN) drawPinScreen();
+            else if (preSaverState == ST_ENG) drawEngScreen();
+            else if (preSaverState == ST_OSK) drawOskScreen();
+        }
         break;
     }
 
