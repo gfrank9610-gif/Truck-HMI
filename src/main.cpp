@@ -109,6 +109,7 @@ static int holdBarW            = 0;
 #define BTN_HOLD_MS        1000
 #define BTN_HOLD_LATCH_MS  2000
 #define FLASH_PERIOD       375
+#define MOMENTARY_CH       5    // channel 6 (0-indexed): press=ON, release=OFF, no flash
 
 static int      holdBtnIdx     = -1;
 static uint32_t holdBtnStartMs = 0;
@@ -698,6 +699,15 @@ void loop() {
             for (int i = 0; i < OUTPUT_COUNT; i++) {
                 int x = btnX(i%BTN_COLS), y = btnY(i/BTN_COLS);
                 if (tx>=x && tx<x+BTN_W && ty>=y && ty<y+BTN_H) {
+                    if (i == MOMENTARY_CH) {
+                        // Momentary: ON on press, OFF on release, no flash
+                        holdBtnIdx     = i;
+                        holdBtnStartMs = now;
+                        relayState[i]  = true;
+                        sendRelayCommand(i+1, true);
+                        drawOutputButton(i);
+                        break;
+                    }
                     // Tapping a latched button cancels its latch
                     if (flashLatched[i]) {
                         flashLatched[i]  = false;
@@ -740,7 +750,7 @@ void loop() {
         }
 
         // ---- While holding a channel button ----
-        if (fingerDown && holdBtnIdx >= 0) {
+        if (fingerDown && holdBtnIdx >= 0 && holdBtnIdx != MOMENTARY_CH) {
             uint32_t held = now - holdBtnStartMs;
             // Activate flash after 2 s
             if (!flashActive && held >= BTN_HOLD_MS) {
@@ -801,7 +811,7 @@ void loop() {
                 strobePhaseOn = false;
                 strobeLastMs  = now;
             } else if (!strobePhaseOn && (now - strobeLastMs) >= STROBE_OFF_MS) {
-                strobeChIdx   = (strobeChIdx + 1) % OUTPUT_COUNT;
+                do { strobeChIdx = (strobeChIdx + 1) % OUTPUT_COUNT; } while (strobeChIdx == MOMENTARY_CH);
                 strobePhaseOn = true;
                 strobeLastMs  = now;
                 sendRelayCommand(strobeChIdx + 1, true);
@@ -812,7 +822,13 @@ void loop() {
 
         // ---- Release a channel button ----
         if (released && holdBtnIdx >= 0) {
-            if (flashActive) {
+            if (holdBtnIdx == MOMENTARY_CH) {
+                // Momentary: OFF on release
+                relayState[holdBtnIdx] = false;
+                sendRelayCommand(holdBtnIdx+1, false);
+                drawOutputButton(holdBtnIdx);
+                holdBtnIdx = -1;
+            } else if (flashActive) {
                 if (now - holdBtnStartMs >= BTN_HOLD_LATCH_MS) {
                     // Held 4 s+: latch the flash, keep it going after release
                     int b = holdBtnIdx;
