@@ -222,7 +222,7 @@ function cardHTML(i) {
       '<div class="ch-btns">' +
         '<div class="tog momentary-btn' + (relays[i] ? ' on' : '') + '" ' +
           'ontouchstart="hornPress(event)" ontouchend="hornRelease(event)" ontouchcancel="hornRelease(event)" ' +
-          'onmousedown="hornPress(event)" onmouseup="hornRelease(event)" onmouseleave="hornRelease(event)">' +
+          'onmousedown="hornPress(event)" onmouseup="hornRelease(event)">' +
           (relays[i] ? 'HONKING' : 'HOLD') +
         '</div>' +
       '</div>'
@@ -283,7 +283,14 @@ async function hornPress(e) {
   e.preventDefault();
   if (!connected) return;
   relays[MOMENTARY] = true;
-  refreshCard(MOMENTARY);
+  // Update appearance in-place — do NOT call refreshCard (would destroy the
+  // touch target mid-gesture, preventing touchend from firing)
+  const card = document.getElementById('c' + MOMENTARY);
+  if (card) {
+    card.classList.add('on');
+    const btn = card.querySelector('.momentary-btn');
+    if (btn) { btn.classList.add('on'); btn.textContent = 'HONKING'; }
+  }
   await send('R6:1');
 }
 
@@ -291,7 +298,12 @@ async function hornRelease(e) {
   e.preventDefault();
   if (!connected || !relays[MOMENTARY]) return;
   relays[MOMENTARY] = false;
-  refreshCard(MOMENTARY);
+  const card = document.getElementById('c' + MOMENTARY);
+  if (card) {
+    card.classList.remove('on');
+    const btn = card.querySelector('.momentary-btn');
+    if (btn) { btn.classList.remove('on'); btn.textContent = 'HOLD'; }
+  }
   await send('R6:0');
 }
 
