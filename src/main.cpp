@@ -897,6 +897,42 @@ void notifyBleStatus() {
 
 // ---- Process a command received from the phone ----
 void processBleCommand(const char* cmd) {
+    // STROBE:1 — start master strobe chase from phone
+    if (strncmp(cmd, "STROBE:1", 8) == 0) {
+        masterHoldActive   = false;
+        for (int i = 0; i < OUTPUT_COUNT; i++) {
+            flashLatched[i] = false;
+            latchFlashOn[i] = false;
+            relayState[i]   = false;
+        }
+        sendRelayCommand(0, false);
+        masterStrobeActive = true;
+        strobeChIdx        = 0;
+        strobePhaseOn      = true;
+        strobeLastMs       = millis();
+        sendRelayCommand(1, true);
+        relayState[0] = true;
+        if (appState == ST_MAIN)
+            for (int i = 0; i < OUTPUT_COUNT; i++) drawOutputButton(i);
+        notifyBleStatus();
+        return;
+    }
+
+    // STROBE:0 — stop master strobe
+    if (strncmp(cmd, "STROBE:0", 8) == 0) {
+        masterStrobeActive = false;
+        for (int i = 0; i < OUTPUT_COUNT; i++) {
+            relayState[i]   = false;
+            flashLatched[i] = false;
+            latchFlashOn[i] = false;
+        }
+        sendRelayCommand(0, false);
+        if (appState == ST_MAIN)
+            for (int i = 0; i < OUTPUT_COUNT; i++) drawOutputButton(i);
+        notifyBleStatus();
+        return;
+    }
+
     // VALET:1 — lock from phone
     if (strncmp(cmd, "VALET:1", 7) == 0) {
         valetMode = true;

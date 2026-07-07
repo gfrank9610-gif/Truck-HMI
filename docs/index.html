@@ -161,6 +161,25 @@ footer { text-align: center; font-size: 10px; color: #2a2a2a; margin-top: 14px; 
 
 .momentary-btn { touch-action: none; background: #1a1200 !important; border-color: #886600 !important; color: #ffcc00 !important; }
 .momentary-btn.on { background: #332600 !important; border-color: #ffcc00 !important; color: #ffee44 !important; box-shadow: 0 0 10px #ffcc0055; }
+
+.strobe-btn {
+  width: 100%; padding: 14px;
+  border-radius: 10px;
+  font-size: 14px; font-weight: bold;
+  cursor: pointer; text-align: center; letter-spacing: 1px;
+  border: 2px solid #4444bb;
+  background: #08081a;
+  color: #8888ff;
+  margin-top: 9px;
+}
+.strobe-btn.active {
+  background: #18184a;
+  border-color: #aaaaff;
+  color: #ffffff;
+  box-shadow: 0 0 14px #4444ff55;
+  animation: strobeGlow .24s infinite alternate;
+}
+@keyframes strobeGlow { from { box-shadow: 0 0 6px #4444ff44; } to { box-shadow: 0 0 18px #8888ffaa; } }
 </style>
 </head>
 <body>
@@ -184,6 +203,7 @@ footer { text-align: center; font-size: 10px; color: #2a2a2a; margin-top: 14px; 
     <div class="mbtn m-off" onclick="masterOff()">&#10005; Master Off</div>
   </div>
 
+  <div class="strobe-btn" id="strobe-btn" onclick="toggleStrobe()">&#9889; Master Strobe</div>
   <div class="valet" onclick="valetLock()">&#128274; Lock — Valet Mode</div>
 </div>
 
@@ -209,9 +229,10 @@ const enc = new TextEncoder();
 const dec = new TextDecoder();
 
 let device, cmdChr, connected = false;
-let relays  = new Array(6).fill(false);
-let flashes = new Array(6).fill(false);
-let names   = ['Ch 1','Ch 2','Ch 3','Ch 4','Ch 5','Ch 6'];
+let relays       = new Array(6).fill(false);
+let flashes      = new Array(6).fill(false);
+let strobeActive = false;
+let names        = ['Ch 1','Ch 2','Ch 3','Ch 4','Ch 5','Ch 6'];
 
 // ---- Build / refresh channel grid ----
 function cardHTML(i) {
@@ -329,6 +350,20 @@ async function masterOff() {
   await send('R0:0');
 }
 
+async function toggleStrobe() {
+  if (!connected) return;
+  strobeActive = !strobeActive;
+  updateStrobeBtn();
+  await send(strobeActive ? 'STROBE:1' : 'STROBE:0');
+}
+
+function updateStrobeBtn() {
+  const btn = document.getElementById('strobe-btn');
+  if (!btn) return;
+  btn.className = 'strobe-btn' + (strobeActive ? ' active' : '');
+  btn.textContent = strobeActive ? '⚡ STROBE ACTIVE — TAP TO STOP' : '⚡ Master Strobe';
+}
+
 async function valetLock() {
   if (!confirm('Lock in Valet Mode?\n\nUnlock requires password on the touchscreen.')) return;
   await send('VALET:1');
@@ -340,10 +375,11 @@ function onStatus(evt) {
   const r = s.match(/R:(\d{6})/);
   const f = s.match(/F:(\d{6})/);
   const v = s.match(/V:(\d)/);
-  if (r) for (let i=0;i<6;i++) relays[i]  = r[1][i]==='1';
-  if (f) for (let i=0;i<6;i++) flashes[i] = f[1][i]==='1';
+  const st = s.match(/S:(\d)/);
+  if (r)  for (let i=0;i<6;i++) relays[i]  = r[1][i]==='1';
+  if (f)  for (let i=0;i<6;i++) flashes[i] = f[1][i]==='1';
+  if (st) { strobeActive = st[1]==='1'; updateStrobeBtn(); }
   buildGrid();
-  // Show/hide valet lock screen
   const locked = v && v[1]==='1';
   document.getElementById('valet-screen').className = locked ? 'show' : '';
 }
@@ -358,6 +394,7 @@ function setUI(on, label) {
   document.getElementById('controls').className   = on ? '' : 'dim';
   if (!on) {
     relays.fill(false); flashes.fill(false);
+    strobeActive = false; updateStrobeBtn();
     buildGrid();
     document.getElementById('valet-screen').className = '';
   }
