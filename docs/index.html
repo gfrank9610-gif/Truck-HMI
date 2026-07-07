@@ -158,6 +158,9 @@ h1 {
 #valet-screen p  { color: #666; font-size: 13px; text-align: center; }
 
 footer { text-align: center; font-size: 10px; color: #2a2a2a; margin-top: 14px; letter-spacing: 1px; }
+
+.momentary-btn { touch-action: none; background: #1a1200 !important; border-color: #886600 !important; color: #ffcc00 !important; }
+.momentary-btn.on { background: #332600 !important; border-color: #ffcc00 !important; color: #ffee44 !important; box-shadow: 0 0 10px #ffcc0055; }
 </style>
 </head>
 <body>
@@ -200,7 +203,7 @@ const SVC_UUID    = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
 const CMD_UUID    = 'beb5483e-36e1-4688-b7f5-ea07361b26a8';
 const STATUS_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 const LABELS_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
-const SKIP_CH     = 5;   // index 5 = Train Horn — excluded from app
+const MOMENTARY   = 5;   // index 5 = Train Horn — press=ON, release=OFF
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -211,33 +214,21 @@ let flashes = new Array(6).fill(false);
 let names   = ['Ch 1','Ch 2','Ch 3','Ch 4','Ch 5','Ch 6'];
 
 // ---- Build / refresh channel grid ----
-function buildGrid() {
-  const g = document.getElementById('grid');
-  g.innerHTML = '';
-  for (let i = 0; i < 6; i++) {
-    if (i === SKIP_CH) continue;
-    const d = document.createElement('div');
-    d.className = 'card' + (relays[i] ? ' on' : '');
-    d.id = 'c' + i;
-    d.innerHTML =
+function cardHTML(i) {
+  if (i === MOMENTARY) {
+    return (
       '<div class="ch-num">CH ' + (i+1) + '</div>' +
       '<div class="ch-name">' + esc(names[i]) + '</div>' +
       '<div class="ch-btns">' +
-        '<div class="tog' + (relays[i] ? ' on' : '') + '" onclick="togRelay(' + i + ')">' +
-          (relays[i] ? 'ON' : 'OFF') +
+        '<div class="tog momentary-btn' + (relays[i] ? ' on' : '') + '" ' +
+          'ontouchstart="hornPress(event)" ontouchend="hornRelease(event)" ontouchcancel="hornRelease(event)" ' +
+          'onmousedown="hornPress(event)" onmouseup="hornRelease(event)" onmouseleave="hornRelease(event)">' +
+          (relays[i] ? 'HONKING' : 'HOLD') +
         '</div>' +
-        '<div class="flash' + (flashes[i] ? ' on' : '') + '" onclick="togFlash(' + i + ')">FLASH</div>' +
-      '</div>';
-    g.appendChild(d);
+      '</div>'
+    );
   }
-}
-
-function refreshCard(i) {
-  if (i === SKIP_CH) return;
-  const d = document.getElementById('c' + i);
-  if (!d) return;
-  d.className = 'card' + (relays[i] ? ' on' : '');
-  d.innerHTML =
+  return (
     '<div class="ch-num">CH ' + (i+1) + '</div>' +
     '<div class="ch-name">' + esc(names[i]) + '</div>' +
     '<div class="ch-btns">' +
@@ -245,7 +236,27 @@ function refreshCard(i) {
         (relays[i] ? 'ON' : 'OFF') +
       '</div>' +
       '<div class="flash' + (flashes[i] ? ' on' : '') + '" onclick="togFlash(' + i + ')">FLASH</div>' +
-    '</div>';
+    '</div>'
+  );
+}
+
+function buildGrid() {
+  const g = document.getElementById('grid');
+  g.innerHTML = '';
+  for (let i = 0; i < 6; i++) {
+    const d = document.createElement('div');
+    d.className = 'card' + (relays[i] ? ' on' : '');
+    d.id = 'c' + i;
+    d.innerHTML = cardHTML(i);
+    g.appendChild(d);
+  }
+}
+
+function refreshCard(i) {
+  const d = document.getElementById('c' + i);
+  if (!d) return;
+  d.className = 'card' + (relays[i] ? ' on' : '');
+  d.innerHTML = cardHTML(i);
 }
 
 function esc(s) {
@@ -268,8 +279,24 @@ async function togRelay(i) {
   await send('R' + (i+1) + ':' + (next ? 1 : 0));
 }
 
+async function hornPress(e) {
+  e.preventDefault();
+  if (!connected) return;
+  relays[MOMENTARY] = true;
+  refreshCard(MOMENTARY);
+  await send('R6:1');
+}
+
+async function hornRelease(e) {
+  e.preventDefault();
+  if (!connected || !relays[MOMENTARY]) return;
+  relays[MOMENTARY] = false;
+  refreshCard(MOMENTARY);
+  await send('R6:0');
+}
+
 async function togFlash(i) {
-  if (i === SKIP_CH) return;
+  if (i === MOMENTARY) return;
   const next  = !flashes[i];
   flashes[i]  = next;
   if (next) relays[i] = true;
