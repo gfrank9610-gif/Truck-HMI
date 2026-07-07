@@ -200,7 +200,7 @@ const SVC_UUID    = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
 const CMD_UUID    = 'beb5483e-36e1-4688-b7f5-ea07361b26a8';
 const STATUS_UUID = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
 const LABELS_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
-const MOMENTARY   = 5;   // index 5 = Train Horn — press-only, no flash
+const SKIP_CH     = 5;   // index 5 = Train Horn — excluded from app
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -215,40 +215,36 @@ function buildGrid() {
   const g = document.getElementById('grid');
   g.innerHTML = '';
   for (let i = 0; i < 6; i++) {
+    if (i === SKIP_CH) continue;
     const d = document.createElement('div');
     d.className = 'card' + (relays[i] ? ' on' : '');
     d.id = 'c' + i;
-    const noFlash = (i === MOMENTARY);
     d.innerHTML =
       '<div class="ch-num">CH ' + (i+1) + '</div>' +
       '<div class="ch-name">' + esc(names[i]) + '</div>' +
       '<div class="ch-btns">' +
-        '<div class="tog' + (relays[i]  ? ' on' : '') + '" onclick="togRelay(' + i + ')">' +
+        '<div class="tog' + (relays[i] ? ' on' : '') + '" onclick="togRelay(' + i + ')">' +
           (relays[i] ? 'ON' : 'OFF') +
         '</div>' +
-        (noFlash ? '' :
-          '<div class="flash' + (flashes[i] ? ' on' : '') + '" onclick="togFlash(' + i + ')">FLASH</div>'
-        ) +
+        '<div class="flash' + (flashes[i] ? ' on' : '') + '" onclick="togFlash(' + i + ')">FLASH</div>' +
       '</div>';
     g.appendChild(d);
   }
 }
 
 function refreshCard(i) {
+  if (i === SKIP_CH) return;
   const d = document.getElementById('c' + i);
   if (!d) return;
-  const noFlash = (i === MOMENTARY);
   d.className = 'card' + (relays[i] ? ' on' : '');
   d.innerHTML =
     '<div class="ch-num">CH ' + (i+1) + '</div>' +
     '<div class="ch-name">' + esc(names[i]) + '</div>' +
     '<div class="ch-btns">' +
-      '<div class="tog' + (relays[i]  ? ' on' : '') + '" onclick="togRelay(' + i + ')">' +
+      '<div class="tog' + (relays[i] ? ' on' : '') + '" onclick="togRelay(' + i + ')">' +
         (relays[i] ? 'ON' : 'OFF') +
       '</div>' +
-      (noFlash ? '' :
-        '<div class="flash' + (flashes[i] ? ' on' : '') + '" onclick="togFlash(' + i + ')">FLASH</div>'
-      ) +
+      '<div class="flash' + (flashes[i] ? ' on' : '') + '" onclick="togFlash(' + i + ')">FLASH</div>' +
     '</div>';
 }
 
@@ -273,7 +269,7 @@ async function togRelay(i) {
 }
 
 async function togFlash(i) {
-  if (i === MOMENTARY) return;
+  if (i === SKIP_CH) return;
   const next  = !flashes[i];
   flashes[i]  = next;
   if (next) relays[i] = true;
