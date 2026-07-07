@@ -67,7 +67,7 @@ bool relayState[OUTPUT_COUNT] = {};
 // ---- Channel labels ----
 static const char* DEFAULT_LABELS[OUTPUT_COUNT] = {
     "Fog Lights","Top Light Bar","Wheel Lights",
-    "Reverse Lights","Bed Lights","Expansion"
+    "Reverse Lights","Bed Lights","Train Horn"
 };
 static char channelNames[OUTPUT_COUNT][17];
 static char engDraft[OUTPUT_COUNT][17];
