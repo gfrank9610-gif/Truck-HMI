@@ -845,19 +845,21 @@ void updateMatrix() {
 
 static NimBLECharacteristic* bleStatusChr = nullptr;
 static NimBLECharacteristic* bleLabelsChr = nullptr;
-static bool                  bleConnected = false;
+static bool                  bleConnected  = false;
+static uint16_t              bleConnHandle = 0xFFFF;
 
 // Thread-safe handoff: BLE task writes, main loop reads
 static volatile bool blePendingCmd = false;
 static char          bleCmdBuf[32] = {};
 static portMUX_TYPE  bleMux        = portMUX_INITIALIZER_UNLOCKED;
-static char          lastBleStatus[48] = {};   // dedup — only notify on change
+static char          lastBleStatus[64] = {};   // dedup — only notify on change
 
 // ---- Server callbacks ----
 class BLEServerCB : public NimBLEServerCallbacks {
-    void onConnect(NimBLEServer*) override {
-        bleConnected = true;
-        lastBleStatus[0] = '\0';   // force immediate status push on connect
+    void onConnect(NimBLEServer*, ble_gap_conn_desc* desc) override {
+        bleConnected  = true;
+        bleConnHandle = desc->conn_handle;
+        lastBleStatus[0] = '\0';
     }
     void onDisconnect(NimBLEServer*) override {
         bleConnected = false;
@@ -882,13 +884,21 @@ class BLECmdCB : public NimBLECharacteristicCallbacks {
 // ---- Notify phone of current state (deduped) ----
 void notifyBleStatus() {
     if (!bleConnected || !bleStatusChr) return;
-    char buf[48];
-    snprintf(buf, sizeof(buf), "R:%d%d%d%d%d%d F:%d%d%d%d%d%d V:%d S:%d",
+    static int8_t   cachedRssi = -127;
+    static uint32_t rssiMs     = 0;
+    uint32_t t = millis();
+    if (t - rssiMs > 2000) {
+        rssiMs = t;
+        ble_gap_conn_rssi(bleConnHandle, &cachedRssi);
+    }
+    int bars = (cachedRssi >= -60) ? 4 : (cachedRssi >= -70) ? 3 : (cachedRssi >= -80) ? 2 : (cachedRssi >= -90) ? 1 : 0;
+    char buf[64];
+    snprintf(buf, sizeof(buf), "R:%d%d%d%d%d%d F:%d%d%d%d%d%d V:%d S:%d I:%d",
         relayState[0]?1:0, relayState[1]?1:0, relayState[2]?1:0,
         relayState[3]?1:0, relayState[4]?1:0, relayState[5]?1:0,
         flashLatched[0]?1:0, flashLatched[1]?1:0, flashLatched[2]?1:0,
         flashLatched[3]?1:0, flashLatched[4]?1:0, flashLatched[5]?1:0,
-        valetMode ? 1 : 0, masterStrobeActive ? 1 : 0);
+        valetMode ? 1 : 0, masterStrobeActive ? 1 : 0, bars);
     if (strcmp(buf, lastBleStatus) == 0) return;
     strncpy(lastBleStatus, buf, sizeof(lastBleStatus));
     bleStatusChr->setValue(buf);

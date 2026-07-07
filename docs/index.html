@@ -180,6 +180,15 @@ footer { text-align: center; font-size: 10px; color: #2a2a2a; margin-top: 14px; 
   animation: strobeGlow .24s infinite alternate;
 }
 @keyframes strobeGlow { from { box-shadow: 0 0 6px #4444ff44; } to { box-shadow: 0 0 18px #8888ffaa; } }
+
+/* ---- Signal bars ---- */
+.sig-bars { display: flex; align-items: flex-end; gap: 2px; height: 14px; margin-left: 4px; }
+.sig-bars span { width: 4px; border-radius: 1px; background: #2a2a2a; transition: background .3s; }
+.sig-bars span:nth-child(1) { height: 25%; }
+.sig-bars span:nth-child(2) { height: 50%; }
+.sig-bars span:nth-child(3) { height: 75%; }
+.sig-bars span:nth-child(4) { height: 100%; }
+.sig-bars span.lit { background: #00ff00; box-shadow: 0 0 4px #00ff0066; }
 </style>
 </head>
 <body>
@@ -191,6 +200,9 @@ footer { text-align: center; font-size: 10px; color: #2a2a2a; margin-top: 14px; 
   <div class="ble-status">
     <div class="ble-dot" id="dot"></div>
     <span id="ble-lbl">Not connected</span>
+    <div class="sig-bars" id="sig-bars">
+      <span></span><span></span><span></span><span></span>
+    </div>
   </div>
   <button id="conn-btn" onclick="toggleConnect()">CONNECT</button>
 </div>
@@ -355,6 +367,12 @@ async function toggleStrobe() {
   await send(strobeActive ? 'STROBE:1' : 'STROBE:0');
 }
 
+function updateSignal(bars) {
+  document.querySelectorAll('#sig-bars span').forEach((s, i) => {
+    s.className = i < bars ? 'lit' : '';
+  });
+}
+
 function updateStrobeBtn() {
   const btn = document.getElementById('strobe-btn');
   if (!btn) return;
@@ -374,9 +392,11 @@ function onStatus(evt) {
   const f = s.match(/F:(\d{6})/);
   const v = s.match(/V:(\d)/);
   const st = s.match(/S:(\d)/);
-  if (r)  for (let i=0;i<6;i++) relays[i]  = r[1][i]==='1';
-  if (f)  for (let i=0;i<6;i++) flashes[i] = f[1][i]==='1';
-  if (st) { strobeActive = st[1]==='1'; updateStrobeBtn(); }
+  const sig = s.match(/I:(\d)/);
+  if (r)   for (let i=0;i<6;i++) relays[i]  = r[1][i]==='1';
+  if (f)   for (let i=0;i<6;i++) flashes[i] = f[1][i]==='1';
+  if (st)  { strobeActive = st[1]==='1'; updateStrobeBtn(); }
+  if (sig) updateSignal(parseInt(sig[1], 10));
   buildGrid();
   const locked = v && v[1]==='1';
   document.getElementById('valet-screen').className = locked ? 'show' : '';
@@ -393,6 +413,7 @@ function setUI(on, label) {
   if (!on) {
     relays.fill(false); flashes.fill(false);
     strobeActive = false; updateStrobeBtn();
+    updateSignal(0);
     buildGrid();
     document.getElementById('valet-screen').className = '';
   }
